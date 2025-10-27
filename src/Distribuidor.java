@@ -16,7 +16,7 @@ public class Distribuidor {
         }
     }
     
-    // --- CLASSE INTERNA DA THREAD (para cumprir o requisito Thread.join()) ---
+    // --- CLASSE INTERNA DA THREAD (Atualizada para "Modo Batch") ---
     static class ContadorThread extends Thread {
         private final String host;
         private final int port;
@@ -34,54 +34,54 @@ public class Distribuidor {
             this.procurado = procurado;
         }
 
-        // --- MÉTODO RUN ATUALIZADO (LÓGICA ASSÍNCRONA) ---
         @Override
         public void run() {
             int localCountSum = 0;
             long threadId = Thread.currentThread().threadId();
-            int pedidosEnviados = 0; // Contador para saber quantas respostas esperar
-
+            
             try (Socket socket = new Socket(host, port);
                  ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
                  ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
 
                 System.out.printf("[D] Conectado a %s:%d (Thread %d)%n", host, port, threadId);
 
+                // --- 1. CRIAR O BATCH (LOCALMENTE, SEM REDE) ---
+                List<Pedido> batchDePedidos = new ArrayList<>();
                 Intervalo inter;
-                
-                // --- 1. LOOP DE ENVIO (NÃO-BLOQUEANTE) ---
-                // Envia todos os pedidos da fila o mais rápido possível
                 while ((inter = queue.poll(500, TimeUnit.MILLISECONDS)) != null) {
-                    
                     int len = inter.fim - inter.inicio;
                     byte[] sub = new byte[len];
                     System.arraycopy(grandeVetor, inter.inicio, sub, 0, len);
                     Pedido p = new Pedido(sub, procurado);
-                    
-                    out.writeObject(p);
-                    out.flush();
-                    out.reset(); // Importante para o ObjectOutputStream
-                    
-                    pedidosEnviados++; // Conta quantos foram enviados
+                    batchDePedidos.add(p);
                 }
-                System.out.printf("[D] (Thread %d) Enviou %d pedidos. Aguardando respostas...%n", threadId, pedidosEnviados);
 
-                // --- 2. LOOP DE RECEBIMENTO (BLOQUEANTE) ---
-                // Agora, espera (bloqueia) por EXATAMENTE o número de respostas enviadas
-                for (int i = 0; i < pedidosEnviados; i++) {
-                    Object o = in.readObject(); // Bloqueia e espera a próxima resposta
-                    
-                    if (o instanceof Resposta r) {
-                        localCountSum += r.getContagem();
+                // Se esta thread não pegou nenhum trabalho (fila estava vazia),
+                // apenas encerra a conexão.
+                if (batchDePedidos.isEmpty()) {
+                    System.out.printf("[D] (Thread %d) Nenhum trabalho na fila.%n", threadId);
+                    this.contagemParcial = 0;
+                } else {
+                    // --- 2. ENVIAR O BATCH DE UMA VEZ (1 COMUNICAÇÃO) ---
+                    System.out.printf("[D] (Thread %d) Enviando batch de %d pedidos...%n", threadId, batchDePedidos.size());
+                    out.writeObject(batchDePedidos); // Envia a LISTA inteira
+                    out.flush();
+                    out.reset();
+
+                    // --- 3. ESPERAR PELA RESPOSTA ÚNICA (1 COMUNICAÇÃO) ---
+                    System.out.printf("[D] (Thread %d) Aguardando resposta do batch...%n", threadId);
+                    Object o = in.readObject(); // Espera UMA resposta
+
+                    if (o instanceof Resposta r) { // Espera uma Resposta única com o total
+                        localCountSum = r.getContagem();
+                        System.out.printf("[D] (Thread %d) Resposta do batch recebida: %d%n", threadId, localCountSum);
                     } else {
                         System.out.printf("[D] Objeto inesperado na resposta de %s:%d: %s%n",
                                 host, port, o.getClass().getName());
                     }
                 }
-                System.out.printf("[D] (Thread %d) Recebeu todas as %d respostas.%n", threadId, pedidosEnviados);
 
-                // --- 3. FIM ---
-                // Envia o comunicado de encerramento
+                // --- 4. FIM ---
                 ComunicadoEncerramento fim = new ComunicadoEncerramento();
                 out.writeObject(fim);
                 out.flush();
@@ -96,9 +96,7 @@ public class Distribuidor {
             
             this.contagemParcial = localCountSum;
         }
-        // --- FIM DA ATUALIZAÇÃO DO RUN ---
         
-        // Getter para a main thread coletar o resultado após o join
         public int getContagemParcial() {
             return contagemParcial;
         }
@@ -218,7 +216,7 @@ public class Distribuidor {
 
     /**
      * Método refatorado para executar uma rodada de contagem distribuída.
-     * --- NENHUMA MUDANÇA NESTE MÉTODO ---
+     * --- Usando Balanceamento Estático (3 filas) ---
      */
     private static void executarContagemDistribuida(byte[] grandeVetor, byte procurado, String[] receptors, int blocksPerServer) {
         int vectorSize = grandeVetor.length;
@@ -252,12 +250,9 @@ public class Distribuidor {
             int port = (parts.length > 1) ? Integer.parseInt(parts[1]) : 12345;
             
             final BlockingQueue<Intervalo> q = queues.get(i);
-            
-            // Cria a thread personalizada
             ContadorThread t = new ContadorThread(host, port, q, grandeVetor, procurado);
-            threads.add(t);
             
-            // Inicia a thread
+            threads.add(t);
             t.start();
         }
 
@@ -265,10 +260,7 @@ public class Distribuidor {
         int finalCount = 0;
         for (ContadorThread t : threads) {
             try {
-                // --- REQUISITO CUMPRIDO: Usando Thread.join() ---
                 t.join();
-                
-                // Coleta o resultado após a thread terminar
                 finalCount += t.getContagemParcial();
                  
             } catch (InterruptedException e) {
