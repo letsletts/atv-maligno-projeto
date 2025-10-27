@@ -106,9 +106,9 @@ public class Distribuidor {
 
     // IPs dos receptores. Mude para os IPs reais no teste distribuído.
     private static final String[] RECEPTORS = {
-        "localhost:12345",
-        "localhost:12346",
-        "localhost:12347"
+        "172.16.130.82:12346",
+        "172.16.130.45:12347",
+        "172.16.130.39:12345"
     };
 
     private static final int BLOCKS_PER_SERVER = 8; 

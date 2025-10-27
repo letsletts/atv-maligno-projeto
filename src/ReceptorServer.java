@@ -1,10 +1,10 @@
 import java.io.*;
 import java.net.*;
-import java.util.List; // Importar List
+// import java.util.List; // REMOVIDO: Import desnecessário
 import java.util.concurrent.*;
 
 public class ReceptorServer {
-    private static final int PORT = 12345; // porta fixa sugerida
+    private static final int PORT = 12345;
     private static final int BACKLOG = 50;
 
     public static void main(String[] args) {
@@ -30,6 +30,8 @@ public class ReceptorServer {
     static class ConnectionHandler implements Runnable {
         private final Socket socket;
         private final ExecutorService workerPool;
+        private final Object outputLock = new Object(); 
+        private ObjectOutputStream out; 
 
         ConnectionHandler(Socket socket) {
             this.socket = socket;
@@ -40,74 +42,52 @@ public class ReceptorServer {
 
         @Override
         public void run() {
-            try (ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-                 ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+            try (ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+                this.out = new ObjectOutputStream(socket.getOutputStream());
 
                 Object obj;
                 while ((obj = in.readObject()) != null) {
                     
-                    // Lógica original para Pedido individual (mantida por segurança)
                     if (obj instanceof Pedido p) {
-                        System.out.printf("[R] Pedido (individual) recebido (%d elementos) procurado=%d%n",
-                                p.getNumeros().length, p.getProcurado());
-
-                        long t0 = System.nanoTime();
-                        int result = contarEmParalelo(p.getNumeros(), p.getProcurado());
-                        long t1 = System.nanoTime();
-
-                        System.out.printf("[R] Contagem local (individual) completa: %d (tempo %.3f ms)%n",
-                                result, (t1 - t0) / 1_000_000.0);
-
-                        Resposta resp = new Resposta(result);
-                        out.writeObject(resp);
-                        out.flush();
-                        out.reset();
-                    } 
-                    
-                    // --- NOVA LÓGICA DE BATCH ---
-                    else if (obj instanceof List) {
-                        // Faz um cast seguro para List<Pedido>
-                        @SuppressWarnings("unchecked") // Ignora o aviso de cast
-                        List<Pedido> batch = (List<Pedido>) obj;
-
-                        if (batch.isEmpty()) {
-                            System.out.println("[R] Recebido batch vazio.");
-                            continue;
-                        }
-
-                        System.out.printf("[R] Batch de %d pedidos recebido. Processando...%n", batch.size());
-                        long t0 = System.nanoTime();
-                        int somaDoBatch = 0;
-
-                        // Processa cada pedido do batch
-                        for (Pedido p : batch) {
-                            // A contagem de cada pedido JÁ é paralela (usa o pool)
-                            somaDoBatch += contarEmParalelo(p.getNumeros(), p.getProcurado());
-                        }
+                        System.out.printf("[R] Pedido recebido (%d elementos). Delegando ao pool...%n", p.getNumeros().length);
                         
-                        long t1 = System.nanoTime();
-                        System.out.printf("[R] Contagem do batch completa: %d (tempo %.3f ms)%n",
-                                somaDoBatch, (t1 - t0) / 1_000_000.0);
+                        Runnable task = () -> {
+                            try {
+                                int result = contarEmParalelo(p.getNumeros(), p.getProcurado());
+                                Resposta resp = new Resposta(result);
 
-                        // Envia UMA resposta com o total
-                        Resposta resp = new Resposta(somaDoBatch);
-                        out.writeObject(resp);
-                        out.flush();
-                        out.reset();
-                    }
-                    // --- FIM DA NOVA LÓGICA ---
+                                synchronized (outputLock) {
+                                    out.writeObject(resp);
+                                    out.flush();
+                                    out.reset();
+                                }
+                                System.out.printf("[R] ...Resposta para o pedido de %d elementos enviada (Resultado=%d)%n", p.getNumeros().length, result);
+
+                            } catch (Exception e) { // Este catch trata o InterruptedException/ExecutionException
+                                System.err.println("[R] Erro em uma tarefa de contagem: " + e.getMessage());
+                            }
+                        };
+                        
+                        workerPool.submit(task); 
+                    
+                    } 
                     
                     else if (obj instanceof ComunicadoEncerramento) {
                         System.out.println("[R] ComunicadoEncerramento recebido. Fechando conexão atual.");
-                        break; // fecha handler
+                        break; 
                     } else {
                         System.out.println("[R] Objeto desconhecido recebido: " + obj.getClass().getName());
                     }
                 }
             } catch (EOFException eof) {
                 System.out.println("[R] Cliente fechou a conexão.");
-            } catch (IOException | ClassNotFoundException | InterruptedException | ExecutionException e) { 
+                
+            // --- CORREÇÃO AQUI ---
+            // Removido 'InterruptedException' e 'ExecutionException'
+            } catch (IOException | ClassNotFoundException e) { 
                 System.err.println("[R] Erro no handler: " + e.getMessage());
+            // --- FIM DA CORREÇÃO ---
+                
             } finally {
                 try {
                     socket.close();
@@ -117,6 +97,7 @@ public class ReceptorServer {
             }
         }
 
+        // Este método não mudou
         private int contarEmParalelo(byte[] vetor, byte procurado) throws InterruptedException, ExecutionException {
             int n = vetor.length;
             int procs = Runtime.getRuntime().availableProcessors();
