@@ -48,6 +48,7 @@ public class Distribuidor {
                 // --- 1. CRIAR O BATCH (LOCALMENTE, SEM REDE) ---
                 List<Pedido> batchDePedidos = new ArrayList<>();
                 Intervalo inter;
+                // Pega todas as tarefas da fila atribuídas a esta thread
                 while ((inter = queue.poll(500, TimeUnit.MILLISECONDS)) != null) {
                     int len = inter.fim - inter.inicio;
                     byte[] sub = new byte[len];
@@ -106,9 +107,9 @@ public class Distribuidor {
 
     // IPs dos receptores. Mude para os IPs reais no teste distribuído.
     private static final String[] RECEPTORS = {
-        "172.16.130.82:12346",
-        "172.16.130.45:12347",
-        "172.16.130.39:12345"
+        "localhost:12345",
+        "localhost:12346",
+        "localhost:12347"
     };
 
     private static final int BLOCKS_PER_SERVER = 8; 
