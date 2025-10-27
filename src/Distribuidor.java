@@ -53,7 +53,7 @@ public class Distribuidor {
                     int len = inter.fim - inter.inicio;
                     byte[] sub = new byte[len];
                     System.arraycopy(grandeVetor, inter.inicio, sub, 0, len);
-                    Pedido p = new Pedido(sub, procurado);
+                    Pedido p = new Pedido(sub, procurado); // <-- Usa Pedido.java
                     batchDePedidos.add(p);
                 }
 
@@ -73,7 +73,7 @@ public class Distribuidor {
                     System.out.printf("[D] (Thread %d) Aguardando resposta do batch...%n", threadId);
                     Object o = in.readObject(); // Espera UMA resposta
 
-                    if (o instanceof Resposta r) { // Espera uma Resposta única com o total
+                    if (o instanceof Resposta r) { // <-- Usa Resposta.java
                         localCountSum = r.getContagem();
                         System.out.printf("[D] (Thread %d) Resposta do batch recebida: %d%n", threadId, localCountSum);
                     } else {
@@ -83,7 +83,7 @@ public class Distribuidor {
                 }
 
                 // --- 4. FIM ---
-                ComunicadoEncerramento fim = new ComunicadoEncerramento();
+                ComunicadoEncerramento fim = new ComunicadoEncerramento(); // <-- Usa ComunicadoEncerramento.java
                 out.writeObject(fim);
                 out.flush();
                 out.reset();
@@ -107,9 +107,9 @@ public class Distribuidor {
 
     // IPs dos receptores. Mude para os IPs reais no teste distribuído.
     private static final String[] RECEPTORS = {
-        "localhost:12345",
-        "localhost:12346",
-        "localhost:12347"
+        "172.16.130.39:12345",  // <-- Exemplo com seu IP de rede
+        "172.16.130.45:12346",
+        "172.16.130.82:12347"
     };
 
     private static final int BLOCKS_PER_SERVER = 8; 
@@ -118,7 +118,7 @@ public class Distribuidor {
         
         try (Scanner scanner = new Scanner(System.in)) {
 
-            int tamanhoMaximoEstimado = MaiorVetorAproximado.estimar(); 
+            int tamanhoMaximoEstimado = MaiorVetorAproximado.estimar(); // <-- Usa MaiorVetorAproximado.java
             
             int tamanhoMaximo = (int)(tamanhoMaximoEstimado * 0.95); 
             
@@ -261,7 +261,7 @@ public class Distribuidor {
         int finalCount = 0;
         for (ContadorThread t : threads) {
             try {
-                t.join();
+                t.join(); // <-- Usa Thread.join()
                 finalCount += t.getContagemParcial();
                  
             } catch (InterruptedException e) {

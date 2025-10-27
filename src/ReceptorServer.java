@@ -52,13 +52,13 @@ public class ReceptorServer {
                     // --- MUDANÇA CRUCIAL: Tratar a LISTA primeiro ---
                     if (obj instanceof List) {
                         @SuppressWarnings("unchecked")
-                        List<Pedido> batch = (List<Pedido>) obj;
+                        List<Pedido> batch = (List<Pedido>) obj; // <-- Usa Pedido.java
 
                         if (batch.isEmpty()) {
                             System.out.println("[R] Recebido batch vazio.");
                             // Envia uma resposta de "0" para destravar o cliente
                             synchronized(outputLock) {
-                                out.writeObject(new Resposta(0));
+                                out.writeObject(new Resposta(0)); // <-- Usa Resposta.java
                                 out.flush();
                                 out.reset();
                             }
@@ -68,13 +68,12 @@ public class ReceptorServer {
                         System.out.printf("[R] Batch de %d pedidos recebido. Processando em paralelo...%n", batch.size());
                         long t0 = System.nanoTime();
 
-                        // --- CORREÇÃO: Processar o batch em paralelo ---
+                        // --- Processar o batch em paralelo ---
                         List<Future<Integer>> batchFutures = new ArrayList<>();
                         for (Pedido p : batch) {
                             // Envia cada pedido do batch para o pool de threads
                             batchFutures.add(workerPool.submit(() -> {
-                                // A contagem de cada pedido JÁ é paralela (usa o pool interno dela)
-                                return contarEmParalelo(p.getNumeros(), p.getProcurado());
+                                return p.contar(); // <-- USA O MÉTODO p.contar()
                             }));
                         }
 
@@ -83,14 +82,13 @@ public class ReceptorServer {
                         for (Future<Integer> f : batchFutures) {
                             somaDoBatch += f.get(); // Espera cada sub-contagem do batch terminar
                         }
-                        // --- FIM DA CORREÇÃO ---
                         
                         long t1 = System.nanoTime();
                         System.out.printf("[R] Contagem do batch completa: %d (tempo %.3f ms)%n",
                                 somaDoBatch, (t1 - t0) / 1_000_000.0);
 
                         // Envia UMA resposta com o total
-                        Resposta resp = new Resposta(somaDoBatch);
+                        Resposta resp = new Resposta(somaDoBatch); // <-- Usa Resposta.java
                         synchronized (outputLock) {
                             out.writeObject(resp);
                             out.flush();
@@ -98,10 +96,7 @@ public class ReceptorServer {
                         }
                     }
                     
-                    // Lógica antiga (removida, pois o cliente não envia mais Pedidos individuais)
-                    // if (obj instanceof Pedido p) { ... } 
-                    
-                    else if (obj instanceof ComunicadoEncerramento) {
+                    else if (obj instanceof ComunicadoEncerramento) { // <-- Usa ComunicadoEncerramento.java
                         System.out.println("[R] ComunicadoEncerramento recebido. Fechando conexão atual.");
                         break; 
                     } else if (!(obj instanceof List)) { // Ignora se não for a Lista ou o Encerramento
@@ -120,31 +115,7 @@ public class ReceptorServer {
                 System.out.println("[R] Handler finalizado.");
             }
         }
-
-        // Este método não mudou
-        private int contarEmParalelo(byte[] vetor, byte procurado) throws InterruptedException, ExecutionException {
-            int n = vetor.length;
-            int procs = Runtime.getRuntime().availableProcessors();
-            int chunk = Math.max(1, (n + procs - 1) / procs);
-
-            // Usa o POOL DA CLASSE, não cria um novo
-            ExecutorService pool = workerPool; 
-            java.util.List<Future<Integer>> futures = new java.util.ArrayList<>();
-
-            for (int i = 0; i < n; i += chunk) {
-                final int start = i;
-                final int end = Math.min(n, i + chunk);
-                futures.add(pool.submit(() -> {
-                    int c = 0;
-                    for (int j = start; j < end; j++)
-                        if (vetor[j] == procurado) c++;
-                    return c;
-                }));
-            }
-
-            int total = 0;
-            for (Future<Integer> f : futures) total += f.get();
-            return total;
-        }
+        
+        // O método "contarEmParalelo" foi removido daqui pois não é mais necessário.
     }
 }
