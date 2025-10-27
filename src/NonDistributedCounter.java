@@ -1,6 +1,6 @@
 public class NonDistributedCounter {
     public static void main(String[] args) {
-        int size = 5_000_000;
+        int size = 500000000;
         if (args.length >= 1) {
             try { size = Integer.parseInt(args[0]); } catch (NumberFormatException ignored) {}
         }
