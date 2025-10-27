@@ -34,12 +34,13 @@ public class Distribuidor {
             this.procurado = procurado;
         }
 
+        // --- MÉTODO RUN ATUALIZADO (LÓGICA ASSÍNCRONA) ---
         @Override
         public void run() {
             int localCountSum = 0;
-            // CORREÇÃO: Usando threadId() em vez do obsoleto getId()
             long threadId = Thread.currentThread().threadId();
-            
+            int pedidosEnviados = 0; // Contador para saber quantas respostas esperar
+
             try (Socket socket = new Socket(host, port);
                  ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
                  ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
@@ -47,10 +48,11 @@ public class Distribuidor {
                 System.out.printf("[D] Conectado a %s:%d (Thread %d)%n", host, port, threadId);
 
                 Intervalo inter;
-                // Consome da fila de tarefas
+                
+                // --- 1. LOOP DE ENVIO (NÃO-BLOQUEANTE) ---
+                // Envia todos os pedidos da fila o mais rápido possível
                 while ((inter = queue.poll(500, TimeUnit.MILLISECONDS)) != null) {
                     
-                    // Cria a cópia do sub-vetor
                     int len = inter.fim - inter.inicio;
                     byte[] sub = new byte[len];
                     System.arraycopy(grandeVetor, inter.inicio, sub, 0, len);
@@ -58,19 +60,28 @@ public class Distribuidor {
                     
                     out.writeObject(p);
                     out.flush();
-                    out.reset();
+                    out.reset(); // Importante para o ObjectOutputStream
+                    
+                    pedidosEnviados++; // Conta quantos foram enviados
+                }
+                System.out.printf("[D] (Thread %d) Enviou %d pedidos. Aguardando respostas...%n", threadId, pedidosEnviados);
 
-                    Object o = in.readObject();
+                // --- 2. LOOP DE RECEBIMENTO (BLOQUEANTE) ---
+                // Agora, espera (bloqueia) por EXATAMENTE o número de respostas enviadas
+                for (int i = 0; i < pedidosEnviados; i++) {
+                    Object o = in.readObject(); // Bloqueia e espera a próxima resposta
+                    
                     if (o instanceof Resposta r) {
-                        System.out.printf("[D] Resposta recebida do %s:%d (Thread %d) -> %d%n", 
-                                          host, port, threadId, r.getContagem());
                         localCountSum += r.getContagem();
                     } else {
                         System.out.printf("[D] Objeto inesperado na resposta de %s:%d: %s%n",
                                 host, port, o.getClass().getName());
                     }
                 }
-                
+                System.out.printf("[D] (Thread %d) Recebeu todas as %d respostas.%n", threadId, pedidosEnviados);
+
+                // --- 3. FIM ---
+                // Envia o comunicado de encerramento
                 ComunicadoEncerramento fim = new ComunicadoEncerramento();
                 out.writeObject(fim);
                 out.flush();
@@ -85,6 +96,7 @@ public class Distribuidor {
             
             this.contagemParcial = localCountSum;
         }
+        // --- FIM DA ATUALIZAÇÃO DO RUN ---
         
         // Getter para a main thread coletar o resultado após o join
         public int getContagemParcial() {
@@ -117,7 +129,6 @@ public class Distribuidor {
                                 tamanhoMaximo, tamanhoMaximo / (1024.0 * 1024.0));
 
 
-            // O rótulo "mainLoop" era desnecessário, removido.
             while (true) {
                 
                 int vectorSize = tamanhoMaximo; 
@@ -196,7 +207,6 @@ public class Distribuidor {
                 String respostaNovaRodada = scanner.nextLine();
                 if (!respostaNovaRodada.trim().equalsIgnoreCase("S")) {
                     System.out.println("[D] Encerrando o Distribuidor.");
-                    // CORREÇÃO: Removido o rótulo "mainLoop" desnecessário
                     break; 
                 }
                 System.out.println("[D] Reiniciando... Gerando novo vetor.\n");
@@ -208,7 +218,7 @@ public class Distribuidor {
 
     /**
      * Método refatorado para executar uma rodada de contagem distribuída.
-     * --- AGORA USA Thread.join() ---
+     * --- NENHUMA MUDANÇA NESTE MÉTODO ---
      */
     private static void executarContagemDistribuida(byte[] grandeVetor, byte procurado, String[] receptors, int blocksPerServer) {
         int vectorSize = grandeVetor.length;
@@ -271,7 +281,5 @@ public class Distribuidor {
 
         System.out.printf("[D] Resultado final: número %d ocorreu %d vezes (tempo total %.3f ms)%n",
                 procurado, finalCount, elapsedMs);
-
-        // Não é mais necessário executors.shutdownNow();
     }
 }
